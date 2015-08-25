@@ -196,20 +196,21 @@ def merge_bzr_proposal(branch_merge_proposal):
     finally:
         shutil.rmtree(dirname)
         os.chdir(oldcwd)
+    _logger.info(_("Bzr merge completed"))
 
 
 def merge_mergable_on_project(project):
     """Merge all approved merge requests on a given project."""
-    _logger.info("Inspecting merge requests on project: %s", project.web_link)
+    _logger.debug("Inspecting merge requests on project: %s", project.web_link)
     num_seen = 0
     for branch_merge_proposal in project.getMergeProposals():
         num_seen += 1
-        _logger.info(_("Inspecting merge proposal: %s"),
-                     branch_merge_proposal.web_link)
+        _logger.debug(_("Inspecting merge proposal: %s"),
+                      branch_merge_proposal.web_link)
         queue_status = branch_merge_proposal.queue_status
         if queue_status != 'Approved':
-            _logger.info(_("Ignoring proposal, queue status is %r"),
-                         queue_status)
+            _logger.debug(_("Ignoring proposal, queue status is %r"),
+                          queue_status)
             continue
         assert queue_status == 'Approved'
         if branch_merge_proposal.source_branch_link is None:
@@ -219,7 +220,7 @@ def merge_mergable_on_project(project):
             assert branch_merge_proposal.target_git_repository_link is None
             merge_bzr_proposal(branch_merge_proposal)
     if num_seen == 0:
-        _logger.info(_("There are no merge proposals present at this time"))
+        _logger.debug(_("There are no merge proposals present at this time"))
 
 
 def main():
