@@ -57,6 +57,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 from launchpadlib.launchpad import Launchpad
 
@@ -251,14 +252,20 @@ def main():
         help=_("name of the launchpad project to process"))
     ns = parser.parse_args()
     _logger.info(_("Logging into launchpad.net"))
-    lp = Launchpad.login_anonymously('process-merge-requests', ns.lp_api_url)
-    for project_name in ns.project_list:
-        try:
-            project = lp.projects[project_name]
-        except KeyError:
-            _logger.error(_("No such project: %s"), project_name)
-        else:
-            merge_mergable_on_project(project)
+    lp = Launchpad.login_with('process-merge-requests', ns.lp_api_url)
+    _logger.info(_("Checking for new things to land every minute..."))
+    try:
+        while True:
+            for project_name in ns.project_list:
+                try:
+                    project = lp.projects[project_name]
+                except KeyError:
+                    _logger.error(_("No such project: %s"), project_name)
+                else:
+                    merge_mergable_on_project(project)
+            time.sleep(60)
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == '__main__':
