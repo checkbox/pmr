@@ -82,16 +82,12 @@ if sys.version_info[0] == 2:
 
 def get_rw_git_url(git_repository):
     """Get the read-write URL of a given launchpad git repository."""
-    # NOTE: work around for https://bugs.launchpad.net/launchpad/+bug/1462288
-    return 'git+ssh://git.launchpad.net/{0}'.format(git_repository.unique_name)
+    return git_repository.git_ssh_url
 
 
 def get_ro_git_url(git_repository):
     """Get the read-only URL of a given launchpad git repository."""
-    # NOTE: work around for https://bugs.launchpad.net/launchpad/+bug/1462288
-    # NOTE: using git:// and not https:// URL because https has some
-    # bugs, see https://bugs.launchpad.net/turnip/+bug/1454452
-    return 'git://git.launchpad.net/{0}'.format(git_repository.unique_name)
+    return git_repository.git_https_url
 
 
 def get_rw_bzr_url(bzr_branch):
