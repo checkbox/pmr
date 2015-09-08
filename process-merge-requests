@@ -88,7 +88,10 @@ def get_rw_git_url(git_repository):
 
 def get_ro_git_url(git_repository):
     """Get the read-only URL of a given launchpad git repository."""
-    return git_repository.git_https_url
+    if git_repository.private:
+        return git_repository.git_ssh_url
+    else:
+        return git_repository.git_https_url
 
 
 def get_rw_bzr_url(bzr_branch):
