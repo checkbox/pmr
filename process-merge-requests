@@ -137,10 +137,6 @@ def do_post_merge_tests(dirname):
 
 def merge_git_proposal(branch_merge_proposal):
     """Merge a git merge proposal."""
-    branch_merge_proposal.createComment(
-        subject='I am now attempting to merge this branch',
-        content=(
-            'I will try to merge this branch. I will keep you posted'))
     merge_id = get_branch_merge_proposal_number(branch_merge_proposal)
     merge_branch = 'merge-{0}'.format(merge_id)
     source_url = get_ro_git_url(branch_merge_proposal.source_git_repository)
@@ -204,12 +200,6 @@ def merge_git_proposal(branch_merge_proposal):
         except subprocess.CalledProcessError:
             _logger.exception("Failed to push merged branch")
             return
-        else:
-            branch_merge_proposal.createComment(
-                subject='All fine, thank you!',
-                content=(
-                    'The branch has been merged as requested.'
-                    ' Thank you for your contribution'))
     finally:
         shutil.rmtree(dirname)
         os.chdir(oldcwd)
