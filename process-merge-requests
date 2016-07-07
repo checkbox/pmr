@@ -1,0 +1,309 @@
+#!/usr/bin/env python
+# encoding: UTF-8
+# Copyright (c) 2015 Canonical Ltd.
+#
+# Author: Zygmunt Krynicki <zygmunt.krynicki@canonical.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""
+Prototype merge request processor for Launchpad.net.
+
+Usage: process-merge-requests PROJECT [PROJECT...]
+
+This looks at all the merge requests related to the launchpad project PROJECT.
+Each merge request must be APPROVED before it is processed. Both Bzr and
+Git-based merge requests are supported.
+
+.. note::
+    There's hook for running post-merge tests. In my opinion this hook should
+    be defined by the _branch_ and not by the configuration of the merge
+    processor. In other words more like travis-ci.org rather than like tarmac.
+    The hook file is ``.pmr-merge-hook`` and it must be executable.
+
+.. warning::
+    There is no support for adding comments on the merge request yet. This will
+    come when the login process is not anonymous.
+
+.. warning::
+    Private repositories are not supported yet, as everything done here is
+    anonymous. The user needs to have de-facto access to perform operations (so
+    both bzr and git need to work for the user that runs this script).
+"""
+
+# NOTE: both python 2.7 and 3.2+ are supported right now. The could could be
+# somewhat cleaner if only 3+ has to work but that decision has not been made
+# yet.
+
+from __future__ import absolute_import, unicode_literals, print_function
+
+import argparse
+import gettext
+import logging
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+from launchpadlib.launchpad import Launchpad
+
+_logger = logging.getLogger("pmr")
+_ = gettext.gettext
+
+# XXX: manual backport shlex.quote from python 3.4
+if sys.version_info[0] == 2:
+    _find_unsafe = re.compile(r'[^\w@%+=:,./-]').search
+
+    def _shlex_quote(s):
+        """Return a shell-escaped version of the string *s*."""
+        if not s:
+            return "''"
+        if _find_unsafe(s) is None:
+            return s
+        # use single quotes, and put single quotes into double quotes
+        # the string $'b is then quoted as '$'"'"'b'
+        return "'" + s.replace("'", "'\"'\"'") + "'"
+
+    shlex.quote = _shlex_quote
+
+
+def get_rw_git_url(git_repository):
+    """Get the read-write URL of a given launchpad git repository."""
+    return git_repository.git_ssh_url
+
+
+def get_ro_git_url(git_repository):
+    """Get the read-only URL of a given launchpad git repository."""
+    if git_repository.private:
+        return git_repository.git_ssh_url
+    else:
+        return git_repository.git_https_url
+
+
+def get_rw_bzr_url(bzr_branch):
+    """Get the read-write URL of a given launchpad bzr branch."""
+    return 'bzr+ssh://bazaar.launchpad.net/{0}'.format(bzr_branch.unique_name)
+
+
+def get_ro_bzr_url(bzr_branch):
+    """Get the read-only URL of a given launchpad bzr branch."""
+    return 'https://code.launchpad.net/{0}'.format(bzr_branch.unique_name)
+
+
+def get_branch_merge_proposal_number(branch_merge_proposal):
+    """Get the numeric ID associated with a branch merge proposal."""
+    # XXX: This is a bit hacky, there is no attribute for this so we just
+    # assume launchpad won't change and parse the self-link. The number
+    # is at the end.
+    return int(branch_merge_proposal.self_link.rsplit('/', 1)[-1])
+
+
+def sh(*args):
+    """Run an external command (without invoking the shell)."""
+    _logger.info("$ %s", ' '.join([shlex.quote(arg) for arg in args]))
+    return subprocess.check_call(args)
+
+
+def do_post_merge_tests(dirname):
+    """Run post-merge tests in the specified tree."""
+    hook_name = '.pmr-merge-hook'
+    hook_script = os.path.join(dirname, hook_name)
+    if not os.path.exists(hook_script):
+        _logger.warning(_("The branch doesn't contain post-merge hook script"))
+        _logger.warning(_("Please add this executable file to the tree: %s"),
+                        hook_name)
+    else:
+        _logger.info(_("Running post-merge hook"))
+        try:
+            sh(hook_script)
+        except subprocess.CalledProcessError:
+            _logger.error(_("Post-merge hook failed"))
+            raise
+
+
+def merge_git_proposal(branch_merge_proposal):
+    """Merge a git merge proposal."""
+    merge_id = get_branch_merge_proposal_number(branch_merge_proposal)
+    merge_branch = 'merge-{0}'.format(merge_id)
+    source_url = get_ro_git_url(branch_merge_proposal.source_git_repository)
+    source_path = branch_merge_proposal.source_git_path
+    # source_branch = source_path.split('/')[-1]
+    # source branch is not used, as we're relying on reviewed_revid
+    reviewed_revid = branch_merge_proposal.reviewed_revid
+    target_url = get_rw_git_url(branch_merge_proposal.target_git_repository)
+    target_path = branch_merge_proposal.target_git_path
+    target_branch = target_path.split('/')[-1]
+    _logger.info(_("Setting up git merge"))
+    _logger.info(_(" - source: %s:%s"), source_url, source_path)
+    _logger.info(_("   revision: %s"), reviewed_revid)
+    _logger.info(_(" - target: %s:%s"), target_url, target_path)
+    oldcwd = os.getcwd()
+    dirname = tempfile.mkdtemp()
+    os.chdir(dirname)
+    try:
+        # Prepare everything
+        try:
+            sh('git', 'init', '.')
+            sh('git', 'remote', 'add', 'target', target_url)
+            sh('git', 'fetch', 'target', target_path)
+            sh('git', 'remote', 'add', 'source', source_url)
+            sh('git', 'fetch', 'source', source_path)
+            sh('git', 'checkout', '-b', merge_branch,
+               'target/{0}'.format(target_branch))
+        except subprocess.CalledProcessError:
+            _logger.exception("Failed to setup merge request")
+            return
+        # Merge the branch
+        try:
+            sh('git', 'merge', '--no-edit', reviewed_revid)
+        except subprocess.CalledProcessError:
+            branch_merge_proposal.createComment(
+                subject='I cannot merge this branch',
+                vote='Needs Fixing',
+                content=(
+                    'I tried to merge it but there are some problems.'
+                    ' Typically you want to merge or rebase and try again.'))
+            branch_merge_proposal.setStatus(
+                status='Needs review', revid=reviewed_revid)
+            _logger.error("Merging fails")
+        # Run tests
+        try:
+            do_post_merge_tests('.')
+        except subprocess.CalledProcessError:
+            branch_merge_proposal.createComment(
+                subject='Tests fail after merging',
+                vote='Needs Fixing',
+                content=(
+                    'The merge was fine but running tests failed.'))
+            branch_merge_proposal.setStatus(
+                status='Needs review', revid=reviewed_revid)
+            _logger.error("Tests fail after merging")
+        # Push to trunk
+        try:
+            sh('git', 'push', 'target',
+               '{0}:{1}'.format(merge_branch, target_branch))
+            pass
+        except subprocess.CalledProcessError:
+            _logger.exception("Failed to push merged branch")
+            return
+    finally:
+        shutil.rmtree(dirname)
+        os.chdir(oldcwd)
+    _logger.info(_("Git merge completed"))
+
+
+def merge_bzr_proposal(branch_merge_proposal):
+    """Merge a bzr merge proposal."""
+    merge_id = get_branch_merge_proposal_number(branch_merge_proposal)
+    merge_branch = 'merge-{0}'.format(merge_id)
+    reviewed_revid = branch_merge_proposal.reviewed_revid
+    source_url = get_ro_bzr_url(branch_merge_proposal.source_branch)
+    target_url = get_rw_bzr_url(branch_merge_proposal.target_branch)
+    _logger.info(_("Setting up bzr merge"))
+    _logger.info(_(" - source: %s"), source_url)
+    _logger.info(_("   revision: %s"), reviewed_revid)
+    _logger.info(_(" - target: %s"), target_url)
+    oldcwd = os.getcwd()
+    dirname = tempfile.mkdtemp()
+    try:
+        os.chdir(dirname)
+        sh('bzr', 'branch', target_url, merge_branch)
+        os.chdir(merge_branch)
+        sh('bzr', 'merge', source_url)
+        sh('bzr', 'commit', "-m", "Automatic merge")
+        do_post_merge_tests('.')
+        sh('bzr', 'push', target_url)
+    except subprocess.CalledProcessError:
+        _logger.exception("Failed to process merge request")
+    finally:
+        shutil.rmtree(dirname)
+        os.chdir(oldcwd)
+    _logger.info(_("Bzr merge completed"))
+
+
+def merge_mergable_on_project(project):
+    """Merge all approved merge requests on a given project."""
+    _logger.debug("Inspecting merge requests on project: %s", project.web_link)
+    num_seen = 0
+    for branch_merge_proposal in project.getMergeProposals():
+        num_seen += 1
+        _logger.debug(_("Inspecting merge proposal: %s"),
+                      branch_merge_proposal.web_link)
+        queue_status = branch_merge_proposal.queue_status
+        if queue_status != 'Approved':
+            _logger.debug(_("Ignoring proposal, queue status is %r"),
+                          queue_status)
+            continue
+        assert queue_status == 'Approved'
+        if branch_merge_proposal.source_branch_link is None:
+            assert branch_merge_proposal.target_branch_link is None
+            merge_git_proposal(branch_merge_proposal)
+        else:
+            assert branch_merge_proposal.target_git_repository_link is None
+            merge_bzr_proposal(branch_merge_proposal)
+    if num_seen == 0:
+        _logger.debug(_("There are no merge proposals present at this time"))
+
+
+def main():
+    """Main program."""
+    logging.basicConfig(level=logging.INFO)
+    parser = argparse.ArgumentParser(
+        description=_(
+            "Process each approved merge requests for each given launchpad"
+            " project."),
+        epilog=_(
+            "This tool processes each approved merge requests each specified"
+            " launchpad.net project. Each merge is performed locally."
+            " Successful merges are pushed back to the target branch."))
+    group = parser.add_argument_group('launchpad instance to use')
+    group.add_argument(
+        "--staging", dest='lp_api_url', action='store_const',
+        const='https://api.staging.launchpad.net/',
+        help=_("Use staging launchpad instance"))
+    group.add_argument(
+        "--qa-staging", dest='lp_api_url', action='store_const',
+        const='https://api.qastaging.launchpad.net/',
+        help=_("Use QA staging launchpad instance"))
+    group.add_argument(
+        "--production", dest='lp_api_url', action='store_const',
+        const='https://api.launchpad.net/',
+        help=_("Use production launchpad instance (default)"))
+    group.set_defaults(lp_api_url='https://api.launchpad.net/')
+    parser.add_argument(
+        'project_list', metavar=_('PROJECT'), nargs="+",
+        help=_("name of the launchpad project to process"))
+    ns = parser.parse_args()
+    _logger.info(_("Logging into launchpad.net"))
+    lp = Launchpad.login_with('process-merge-requests', ns.lp_api_url)
+    _logger.info(_("Checking for new things to land every minute..."))
+    try:
+        while True:
+            for project_name in ns.project_list:
+                try:
+                    project = lp.projects[project_name]
+                except KeyError:
+                    _logger.error(_("No such project: %s"), project_name)
+                else:
+                    merge_mergable_on_project(project)
+            time.sleep(60)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
