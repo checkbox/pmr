@@ -94,6 +94,21 @@ def get_ro_git_url(git_repository):
         return git_repository.git_https_url
 
 
+def get_git_identity(git_repository, git_path):
+    """Get the identity of a given Launchpad git reference.
+
+    This emulates Launchpad's internal GitRef.identity method, used to
+    display merge proposal titles.
+    """
+    shortened_path = git_repository.git_identity
+    if shortened_path.startswith('lp:'):
+        shortened_path = shortened_path[len('lp:'):]
+    branch_name = git_path
+    if branch_name.startswith('refs/heads/'):
+        branch_name = branch_name[len('refs/heads/'):]
+    return '{0}:{1}'.format(shortened_path, branch_name)
+
+
 def get_rw_bzr_url(bzr_branch):
     """Get the read-write URL of a given launchpad bzr branch."""
     return 'bzr+ssh://bazaar.launchpad.net/{0}'.format(bzr_branch.unique_name)
@@ -143,10 +158,16 @@ def merge_git_proposal(branch_merge_proposal):
     source_path = branch_merge_proposal.source_git_path
     # source_branch = source_path.split('/')[-1]
     # source branch is not used, as we're relying on reviewed_revid
+    source_identity = get_git_identity(
+        branch_merge_proposal.source_git_repository,
+        branch_merge_proposal.source_git_path)
     reviewed_revid = branch_merge_proposal.reviewed_revid
     target_url = get_rw_git_url(branch_merge_proposal.target_git_repository)
     target_path = branch_merge_proposal.target_git_path
     target_branch = target_path.split('/')[-1]
+    commit_message = 'Merge #{0} from {1}'.format(merge_id, source_identity)
+    if branch_merge_proposal.commit_message is not None:
+        commit_message += '\n\n' + branch_merge_proposal.commit_message
     _logger.info(_("Setting up git merge"))
     _logger.info(_(" - source: %s:%s"), source_url, source_path)
     _logger.info(_("   revision: %s"), reviewed_revid)
@@ -169,7 +190,8 @@ def merge_git_proposal(branch_merge_proposal):
             return
         # Merge the branch
         try:
-            sh('git', 'merge', '--no-edit', reviewed_revid)
+            sh('git', 'merge', '--no-ff', '--no-edit', '-m', commit_message,
+               reviewed_revid)
         except subprocess.CalledProcessError:
             branch_merge_proposal.createComment(
                 subject='I cannot merge this branch',
