@@ -320,9 +320,13 @@ def main():
         help=_("name of the launchpad project to process"))
     parser.add_argument("-u", "--user",
                         help="Specify launchpad user id", metavar="USER")
+    parser.add_argument("--credentials",
+                        help="Specify launchpad credentials", metavar="CRED")
     ns = parser.parse_args()
     _logger.info(_("Logging into launchpad.net"))
-    lp = Launchpad.login_with('process-merge-requests', ns.lp_api_url)
+    lp = Launchpad.login_with(
+        'process-merge-requests', ns.lp_api_url,
+        credentials_file=ns.credentials)
     _logger.info(_("Checking for new things to land every minute..."))
     try:
         while True:
