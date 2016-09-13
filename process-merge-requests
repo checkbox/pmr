@@ -128,10 +128,10 @@ def get_branch_merge_proposal_number(branch_merge_proposal):
     return int(branch_merge_proposal.self_link.rsplit('/', 1)[-1])
 
 
-def sh(*args):
+def sh(*args, **kwargs):
     """Run an external command (without invoking the shell)."""
     _logger.info("$ %s", ' '.join([shlex.quote(arg) for arg in args]))
-    return subprocess.check_call(args)
+    return subprocess.check_call(args, **kwargs)
 
 
 def do_post_merge_tests(dirname):
@@ -322,6 +322,8 @@ def main():
                         help="Specify launchpad user id", metavar="USER")
     parser.add_argument("--credentials",
                         help="Specify launchpad credentials", metavar="CRED")
+    parser.add_argument("--pre_exec",
+                        help="Specify a pre-merge hook", metavar="FILE")
     ns = parser.parse_args()
     _logger.info(_("Logging into launchpad.net"))
     lp = Launchpad.login_with(
@@ -331,6 +333,12 @@ def main():
     try:
         while True:
             projects = []
+            if ns.pre_exec:
+                if not os.path.exists(ns.pre_exec):
+                    _logger.warning(_("Pre-merge hook script not found"))
+                else:
+                    with open(os.devnull, 'wb') as DEVNULL:
+                        sh(ns.pre_exec, stdout=DEVNULL)
             if ns.conf_file:
                 config = ConfigParser.ConfigParser()
                 config.read(ns.conf_file)
