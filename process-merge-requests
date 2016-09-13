@@ -48,6 +48,7 @@ Git-based merge requests are supported.
 from __future__ import absolute_import, unicode_literals, print_function
 
 import argparse
+import ConfigParser
 import gettext
 import logging
 import os
@@ -307,8 +308,11 @@ def main():
         const='https://api.launchpad.net/',
         help=_("Use production launchpad instance (default)"))
     group.set_defaults(lp_api_url='https://api.launchpad.net/')
-    parser.add_argument(
-        'project_list', metavar=_('PROJECT'), nargs="+",
+    group2 = parser.add_mutually_exclusive_group(required=True)
+    group2.add_argument("--conf_file",
+                        help="Specify config file", metavar="CONF")
+    group2.add_argument(
+        '--project_list', metavar=_('PROJECT'), nargs="+",
         help=_("name of the launchpad project to process"))
     ns = parser.parse_args()
     _logger.info(_("Logging into launchpad.net"))
@@ -316,7 +320,15 @@ def main():
     _logger.info(_("Checking for new things to land every minute..."))
     try:
         while True:
-            for project_name in ns.project_list:
+            projects = []
+            if ns.conf_file:
+                config = ConfigParser.ConfigParser()
+                config.read(ns.conf_file)
+                projects = [section[3:] for section in config.sections() if
+                            section.startswith('lp:')]
+            else:
+                projects = ns.project_list
+            for project_name in projects:
                 try:
                     project = lp.projects[project_name]
                 except KeyError:
