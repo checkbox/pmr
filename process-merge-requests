@@ -151,11 +151,13 @@ def do_post_merge_tests(dirname):
             raise
 
 
-def merge_git_proposal(branch_merge_proposal):
+def merge_git_proposal(branch_merge_proposal, user):
     """Merge a git merge proposal."""
     merge_id = get_branch_merge_proposal_number(branch_merge_proposal)
     merge_branch = 'merge-{0}'.format(merge_id)
     source_url = get_ro_git_url(branch_merge_proposal.source_git_repository)
+    if user:
+        source_url = source_url.replace('://git', '://' + user + '@git')
     source_path = branch_merge_proposal.source_git_path
     # source_branch = source_path.split('/')[-1]
     # source branch is not used, as we're relying on reviewed_revid
@@ -164,6 +166,8 @@ def merge_git_proposal(branch_merge_proposal):
         branch_merge_proposal.source_git_path)
     reviewed_revid = branch_merge_proposal.reviewed_revid
     target_url = get_rw_git_url(branch_merge_proposal.target_git_repository)
+    if user:
+        target_url = target_url.replace('://git', '://' + user + '@git')
     target_path = branch_merge_proposal.target_git_path
     target_branch = target_path.split('/')[-1]
     commit_message = 'Merge #{0} from {1}'.format(merge_id, source_identity)
@@ -230,7 +234,7 @@ def merge_git_proposal(branch_merge_proposal):
     _logger.info(_("Git merge completed"))
 
 
-def merge_bzr_proposal(branch_merge_proposal):
+def merge_bzr_proposal(branch_merge_proposal, user):
     """Merge a bzr merge proposal."""
     merge_id = get_branch_merge_proposal_number(branch_merge_proposal)
     merge_branch = 'merge-{0}'.format(merge_id)
@@ -259,7 +263,7 @@ def merge_bzr_proposal(branch_merge_proposal):
     _logger.info(_("Bzr merge completed"))
 
 
-def merge_mergable_on_project(project):
+def merge_mergable_on_project(project, user):
     """Merge all approved merge requests on a given project."""
     _logger.debug("Inspecting merge requests on project: %s", project.web_link)
     num_seen = 0
@@ -275,10 +279,10 @@ def merge_mergable_on_project(project):
         assert queue_status == 'Approved'
         if branch_merge_proposal.source_branch_link is None:
             assert branch_merge_proposal.target_branch_link is None
-            merge_git_proposal(branch_merge_proposal)
+            merge_git_proposal(branch_merge_proposal, user)
         else:
             assert branch_merge_proposal.target_git_repository_link is None
-            merge_bzr_proposal(branch_merge_proposal)
+            merge_bzr_proposal(branch_merge_proposal, user)
     if num_seen == 0:
         _logger.debug(_("There are no merge proposals present at this time"))
 
@@ -314,6 +318,8 @@ def main():
     group2.add_argument(
         '--project_list', metavar=_('PROJECT'), nargs="+",
         help=_("name of the launchpad project to process"))
+    parser.add_argument("-u", "--user",
+                        help="Specify launchpad user id", metavar="USER")
     ns = parser.parse_args()
     _logger.info(_("Logging into launchpad.net"))
     lp = Launchpad.login_with('process-merge-requests', ns.lp_api_url)
@@ -334,7 +340,7 @@ def main():
                 except KeyError:
                     _logger.error(_("No such project: %s"), project_name)
                 else:
-                    merge_mergable_on_project(project)
+                    merge_mergable_on_project(project, ns.user)
             time.sleep(60)
     except KeyboardInterrupt:
         pass
