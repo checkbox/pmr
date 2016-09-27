@@ -214,6 +214,7 @@ def merge_git_proposal(branch_merge_proposal):
             branch_merge_proposal.setStatus(
                 status='Needs review', revid=reviewed_revid)
             _logger.error("Tests fail after merging")
+            return
         # Push to trunk
         try:
             sh('git', 'push', 'target',
