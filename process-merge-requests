@@ -285,7 +285,8 @@ def merge_mergable_on_project(project, user, credentials):
             merge_git_proposal(branch_merge_proposal, user, credentials)
         else:
             assert branch_merge_proposal.target_git_repository_link is None
-            merge_bzr_proposal(branch_merge_proposal, user, credentials)
+            _logger.debug(_("Ignoring bzr proposal..."))
+            #merge_bzr_proposal(branch_merge_proposal, user, credentials)
     if num_seen == 0:
         _logger.debug(_("There are no merge proposals present at this time"))
 
