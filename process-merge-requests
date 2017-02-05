@@ -131,7 +131,7 @@ def get_branch_merge_proposal_number(branch_merge_proposal):
 def sh(*args, **kwargs):
     """Run an external command (without invoking the shell)."""
     _logger.info("$ %s", ' '.join([shlex.quote(arg) for arg in args]))
-    return subprocess.check_call(args, **kwargs)
+    return subprocess.check_output(args, **kwargs)
 
 
 def do_post_merge_tests(dirname, credentials):
@@ -148,8 +148,9 @@ def do_post_merge_tests(dirname, credentials):
         if credentials:
             env["LP_CREDENTIALS"] = credentials
         try:
-            sh(hook_script, env=env)
-        except subprocess.CalledProcessError:
+            print(sh(hook_script, env=env))
+        except subprocess.CalledProcessError as e:
+            print(e.output)
             _logger.error(_("Post-merge hook failed"))
             raise
 
@@ -213,12 +214,11 @@ def merge_git_proposal(branch_merge_proposal, user, credentials):
         # Run tests
         try:
             do_post_merge_tests('.', credentials)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             branch_merge_proposal.createComment(
                 subject='Tests fail after merging',
                 vote='Needs Fixing',
-                content=(
-                    'The merge was fine but running tests failed.'))
+                content=u'The merge was fine but running tests failed.\n\n' + e.output)
             branch_merge_proposal.setStatus(
                 status='Needs review', revid=reviewed_revid)
             _logger.error("Tests fail after merging")
@@ -341,8 +341,7 @@ def main():
                 if not os.path.exists(ns.pre_exec):
                     _logger.warning(_("Pre-merge hook script not found"))
                 else:
-                    with open(os.devnull, 'wb') as DEVNULL:
-                        sh(ns.pre_exec, stdout=DEVNULL)
+                    sh(ns.pre_exec)
             if ns.conf_file:
                 config = ConfigParser.ConfigParser()
                 config.read(ns.conf_file)
