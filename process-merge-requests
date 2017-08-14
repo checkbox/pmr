@@ -322,6 +322,9 @@ def main():
     group2.add_argument(
         '--project_list', metavar=_('PROJECT'), nargs="+",
         help=_("name of the launchpad project to process"))
+    parser.add_argument(
+        "--no-loop", action='store_true', default=False,
+        help=_("Check all projects for things to land once, then exit"))
     parser.add_argument("-u", "--user",
                         help="Specify launchpad user id", metavar="USER")
     parser.add_argument("--credentials",
@@ -356,6 +359,8 @@ def main():
                     _logger.error(_("No such project: %s"), project_name)
                 else:
                     merge_mergable_on_project(project, ns.user, ns.credentials)
+            if ns.no_loop:
+                break
             time.sleep(60)
     except KeyboardInterrupt:
         pass
