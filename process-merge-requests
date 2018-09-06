@@ -134,16 +134,16 @@ def sh(*args, **kwargs):
     return subprocess.check_output(args, **kwargs)
 
 
-def do_post_merge_tests(dirname, credentials):
-    """Run post-merge tests in the specified tree."""
-    hook_name = '.pmr-merge-hook'
-    hook_script = os.path.join(dirname, hook_name)
+def do_run_hook(hook_file, hook_name, dirname, credentials):
+    """Run hook in the specified tree."""
+    hook_script = os.path.join(dirname, hook_file)
     if not os.path.exists(hook_script):
-        _logger.warning(_("The branch doesn't contain post-merge hook script"))
-        _logger.warning(_("Please add this executable file to the tree: %s"),
-                        hook_name)
+        _logger.warning(
+            _("The branch doesn't contain {} hook script".format(hook_name)))
+        _logger.warning(
+            _("Please add this executable file to the tree: {}".format(hook_file)))
     else:
-        _logger.info(_("Running post-merge hook"))
+        _logger.info(_("Running {} hook".format(hook_name)))
         env = os.environ.copy()
         if credentials:
             env["LP_CREDENTIALS"] = credentials
@@ -151,7 +151,7 @@ def do_post_merge_tests(dirname, credentials):
             print(sh(hook_script, env=env))
         except subprocess.CalledProcessError as e:
             print(e.output)
-            _logger.error(_("Post-merge hook failed"))
+            _logger.error(_("{} hook failed".format(hook_name)))
             raise
 
 
@@ -213,7 +213,7 @@ def merge_git_proposal(branch_merge_proposal, user, credentials):
             _logger.error("Merging fails")
         # Run tests
         try:
-            do_post_merge_tests('.', credentials)
+            do_run_hook('.pmr-merge-hook', 'post-merge', '.', credentials)
         except subprocess.CalledProcessError as e:
             branch_merge_proposal.createComment(
                 subject='Tests fail after merging',
@@ -231,6 +231,10 @@ def merge_git_proposal(branch_merge_proposal, user, credentials):
         except subprocess.CalledProcessError:
             _logger.exception("Failed to push merged branch")
             return
+        try:
+            do_run_hook('.pmr-push-hook', 'post-push', '.', credentials)
+        except subprocess.CalledProcessError as e:
+            _logger.warning("Post push actions failed, but merge completed")
     finally:
         shutil.rmtree(dirname)
         os.chdir(oldcwd)
