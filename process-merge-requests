@@ -51,6 +51,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import sys
 
 from launchpadlib.launchpad import Launchpad
 
@@ -191,10 +192,12 @@ def merge_git_proposal(branch_merge_proposal, user, credentials):
         try:
             do_run_hook('.pmr-merge-hook', 'post-merge', '.', credentials)
         except subprocess.CalledProcessError as e:
+            msg = 'The merge was fine but running tests failed.\n\n{}'.format(
+                e.output.decode(sys.stdout.encoding))
             branch_merge_proposal.createComment(
                 subject='Tests fail after merging',
                 vote='Needs Fixing',
-                content='The merge was fine but running tests failed.\n\n' + e.output)
+                content=msg)
             branch_merge_proposal.setStatus(
                 status='Needs review', revid=reviewed_revid)
             _logger.error("Tests fail after merging")
