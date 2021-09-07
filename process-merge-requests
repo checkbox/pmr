@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding: UTF-8
-# Copyright (c) 2015 Canonical Ltd.
+# Copyright (c) 2015-2021 Canonical Ltd.
 #
 # Author: Zygmunt Krynicki <zygmunt.krynicki@canonical.com>
 #
@@ -41,45 +41,22 @@ Git-based merge requests are supported.
     both bzr and git need to work for the user that runs this script).
 """
 
-# NOTE: both python 2.7 and 3.2+ are supported right now. The could could be
-# somewhat cleaner if only 3+ has to work but that decision has not been made
-# yet.
-
-from __future__ import absolute_import, unicode_literals, print_function
-
 import argparse
-import ConfigParser
+import configparser
 import gettext
 import logging
 import os
-import re
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
+import sys
 
 from launchpadlib.launchpad import Launchpad
 
 _logger = logging.getLogger("pmr")
 _ = gettext.gettext
-
-# XXX: manual backport shlex.quote from python 3.4
-if sys.version_info[0] == 2:
-    _find_unsafe = re.compile(r'[^\w@%+=:,./-]').search
-
-    def _shlex_quote(s):
-        """Return a shell-escaped version of the string *s*."""
-        if not s:
-            return "''"
-        if _find_unsafe(s) is None:
-            return s
-        # use single quotes, and put single quotes into double quotes
-        # the string $'b is then quoted as '$'"'"'b'
-        return "'" + s.replace("'", "'\"'\"'") + "'"
-
-    shlex.quote = _shlex_quote
 
 
 def get_rw_git_url(git_repository):
@@ -215,10 +192,12 @@ def merge_git_proposal(branch_merge_proposal, user, credentials):
         try:
             do_run_hook('.pmr-merge-hook', 'post-merge', '.', credentials)
         except subprocess.CalledProcessError as e:
+            msg = 'The merge was fine but running tests failed.\n\n{}'.format(
+                e.output.decode(sys.stdout.encoding))
             branch_merge_proposal.createComment(
                 subject='Tests fail after merging',
                 vote='Needs Fixing',
-                content=u'The merge was fine but running tests failed.\n\n' + e.output)
+                content=msg)
             branch_merge_proposal.setStatus(
                 status='Needs review', revid=reviewed_revid)
             _logger.error("Tests fail after merging")
@@ -350,7 +329,7 @@ def main():
                 else:
                     sh(ns.pre_exec)
             if ns.conf_file:
-                config = ConfigParser.ConfigParser()
+                config = configparser.ConfigParser(strict=False)
                 config.read(ns.conf_file)
                 projects = [section[3:] for section in config.sections() if
                             section.startswith('lp:')]
